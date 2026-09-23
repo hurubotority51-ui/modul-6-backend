@@ -19,6 +19,11 @@ func main() {
 	authHandler := route.NewAuthHandler(authService)
 	authHandler.Register(app)
 
+	studentRepository := repository.NewInMemoryStudentRepository()
+	studentService := service.NewStudentService(studentRepository)
+	studentHandler := route.NewStudentHandler(studentService)
+	studentHandler.Register(app)
+
 	protected := app.Group("/api/v1", middleware.AuthRequired())
 	protected.Get("/profile", route.Profile)
 	protected.Get("/user-area", middleware.RequireRoles("user", "admin"), route.UserArea)
