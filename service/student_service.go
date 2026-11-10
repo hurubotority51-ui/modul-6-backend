@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"modul6/helper"
 	"modul6/model"
 	"modul6/repository"
 )
 
-var ErrInvalidStudent = errors.New("data student tidak valid")
 var ErrDuplicateNIM = errors.New("nim sudah digunakan")
 
 type StudentService struct {
@@ -21,7 +21,7 @@ func NewStudentService(repository repository.StudentRepository) *StudentService 
 	return &StudentService{repository: repository}
 }
 
-func (s *StudentService) List(query model.ListQuery) ([]model.Student, model.Meta) {
+func (s *StudentService) List(query model.CursorQuery) ([]model.Student, model.CursorMeta) {
 	students := s.repository.List()
 	filtered := make([]model.Student, 0, len(students))
 	for _, student := range students {
@@ -34,40 +34,34 @@ func (s *StudentService) List(query model.ListQuery) ([]model.Student, model.Met
 		filtered = append(filtered, student)
 	}
 
-	sort.SliceStable(filtered, func(i, j int) bool {
-		var less bool
-		switch query.Sort {
-		case "nim":
-			less = filtered[i].NIM < filtered[j].NIM
-		case "name":
-			less = filtered[i].Name < filtered[j].Name
-		case "grade":
-			less = filtered[i].Grade < filtered[j].Grade
-		case "created_at":
-			less = filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
-		default:
-			less = filtered[i].ID < filtered[j].ID
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].CreatedAt.Equal(filtered[j].CreatedAt) {
+			return filtered[i].ID > filtered[j].ID
 		}
-		if query.Order == "desc" {
-			return !less
-		}
-		return less
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
 	})
 
-	total := len(filtered)
-	totalPages := 0
-	if total > 0 {
-		totalPages = (total + query.Limit - 1) / query.Limit
+	if query.After != nil {
+		after := query.After
+		remaining := filtered[:0]
+		for _, student := range filtered {
+			if student.CreatedAt.Before(after.CreatedAt) ||
+				(student.CreatedAt.Equal(after.CreatedAt) && student.ID < after.ID) {
+				remaining = append(remaining, student)
+			}
+		}
+		filtered = remaining
 	}
-	start := (query.Page - 1) * query.Limit
-	if start > total {
-		start = total
+	hasMore := len(filtered) > query.Limit
+	if hasMore {
+		filtered = filtered[:query.Limit]
 	}
-	end := start + query.Limit
-	if end > total {
-		end = total
+	meta := model.CursorMeta{Limit: query.Limit, HasMore: hasMore}
+	if hasMore && len(filtered) > 0 {
+		last := filtered[len(filtered)-1]
+		meta.NextCursor = helper.EncodeCursor(last.CreatedAt, last.ID)
 	}
-	return filtered[start:end], model.Meta{Page: query.Page, Limit: query.Limit, Total: total, TotalPages: totalPages}
+	return filtered, meta
 }
 
 func (s *StudentService) GetByID(id int) (model.Student, error) {
@@ -77,9 +71,6 @@ func (s *StudentService) GetByID(id int) (model.Student, error) {
 func (s *StudentService) Create(request model.CreateStudentRequest) (model.Student, error) {
 	request.NIM = strings.TrimSpace(request.NIM)
 	request.Name = strings.TrimSpace(request.Name)
-	if request.NIM == "" || request.Name == "" || request.Grade < 0 || request.Grade > 4 {
-		return model.Student{}, ErrInvalidStudent
-	}
 	for _, student := range s.repository.List() {
 		if strings.EqualFold(student.NIM, request.NIM) {
 			return model.Student{}, ErrDuplicateNIM
@@ -89,4 +80,32 @@ func (s *StudentService) Create(request model.CreateStudentRequest) (model.Stude
 		NIM: request.NIM, Name: request.Name, Grade: request.Grade,
 		IsActive: request.IsActive, CreatedAt: time.Now(),
 	}), nil
+}
+
+func (s *StudentService) Patch(id int, request model.PatchStudentRequest) (model.Student, error) {
+	student, err := s.repository.GetByID(id)
+	if err != nil {
+		return model.Student{}, err
+	}
+	if request.NIM != nil {
+		student.NIM = strings.TrimSpace(*request.NIM)
+	}
+	if request.Name != nil {
+		student.Name = strings.TrimSpace(*request.Name)
+	}
+	if request.Grade != nil {
+		student.Grade = *request.Grade
+	}
+	if request.IsActive != nil {
+		student.IsActive = *request.IsActive
+	}
+	for _, current := range s.repository.List() {
+		if current.ID != student.ID && strings.EqualFold(current.NIM, student.NIM) {
+			return model.Student{}, ErrDuplicateNIM
+		}
+	}
+	if err := s.repository.Update(student); err != nil {
+		return model.Student{}, err
+	}
+	return student, nil
 }

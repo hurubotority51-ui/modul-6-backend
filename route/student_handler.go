@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"modul6/helper"
 	"modul6/middleware"
 	"modul6/model"
 	"modul6/repository"
@@ -26,57 +27,135 @@ func (h *StudentHandler) Register(app *fiber.App) {
 	students.Get("/", h.list)
 	students.Get("/:id", h.get)
 	students.Post("/", middleware.RequireRoles("admin"), h.create)
+	students.Patch("/:id", middleware.RequireRoles("admin"), h.patch)
 }
 
 func (h *StudentHandler) list(c *fiber.Ctx) error {
-	query := model.ListQuery{
-		Page: c.QueryInt("page", 1), Limit: c.QueryInt("limit", 10),
-		Search: strings.TrimSpace(c.Query("search")), Sort: strings.ToLower(c.Query("sort", "id")),
-		Order: strings.ToLower(c.Query("order", "asc")),
+	format, err := helper.Negotiate(c, helper.FormatJSON, helper.FormatCSV)
+	if err != nil {
+		return err
 	}
-	if query.Page < 1 {
-		query.Page = 1
+
+	limit := 10
+	if raw := c.Query("limit"); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 1 {
+			return helper.BadRequest("limit harus berupa angka positif")
+		}
+		if limit > 100 {
+			limit = 100
+		}
 	}
-	if query.Limit < 1 || query.Limit > 100 {
-		query.Limit = 10
+	query := model.CursorQuery{
+		Limit:  limit,
+		Search: strings.TrimSpace(c.Query("search")),
 	}
-	if query.Sort != "id" && query.Sort != "nim" && query.Sort != "name" && query.Sort != "grade" && query.Sort != "created_at" {
-		query.Sort = "id"
-	}
-	if query.Order != "asc" && query.Order != "desc" {
-		query.Order = "asc"
-	}
-	if raw := strings.ToLower(c.Query("is_active")); raw == "true" || raw == "false" {
-		value := raw == "true"
+	if raw := strings.TrimSpace(c.Query("is_active")); raw != "" {
+		value, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			return helper.BadRequest("is_active harus bernilai true atau false")
+		}
 		query.IsActive = &value
 	}
+	if raw := c.Query("cursor"); raw != "" {
+		cursor, decodeErr := helper.DecodeCursor(raw)
+		if decodeErr != nil {
+			return helper.BadRequest("cursor tidak valid")
+		}
+		query.After = &cursor
+	}
+
 	data, meta := h.service.List(query)
-	return c.JSON(fiber.Map{"success": true, "message": "daftar student berhasil diambil", "data": data, "meta": meta})
+	if format == helper.FormatCSV {
+		return helper.WriteStudentsCSV(c, data)
+	}
+	return c.JSON(fiber.Map{
+		"success": true, "message": "daftar student berhasil diambil",
+		"data": data, "meta": meta,
+	})
 }
 
 func (h *StudentHandler) get(c *fiber.Ctx) error {
-	id, err := strconv.Atoi(c.Params("id"))
-	if err != nil || id < 1 {
-		return failure(c, fiber.StatusBadRequest, "id harus berupa angka positif", nil)
+	id, err := parseStudentID(c)
+	if err != nil {
+		return err
 	}
 	student, err := h.service.GetByID(id)
 	if errors.Is(err, repository.ErrStudentNotFound) {
-		return failure(c, fiber.StatusNotFound, "student tidak ditemukan", nil)
+		return helper.NotFound("student tidak ditemukan")
+	}
+	if err != nil {
+		return helper.Internal(err)
 	}
 	return success(c, "student ditemukan", student)
 }
 
 func (h *StudentHandler) create(c *fiber.Ctx) error {
+	if err := helper.RequireJSON(c); err != nil {
+		return err
+	}
 	var request model.CreateStudentRequest
 	if err := c.BodyParser(&request); err != nil {
-		return failure(c, fiber.StatusBadRequest, "body harus berupa JSON yang valid", nil)
+		return helper.BadRequest("body harus berupa JSON yang valid")
+	}
+	request.NIM = strings.TrimSpace(request.NIM)
+	request.Name = strings.TrimSpace(request.Name)
+	if fields := helper.ValidateStruct(request); fields != nil {
+		return helper.Validation(fields)
 	}
 	student, err := h.service.Create(request)
 	if errors.Is(err, service.ErrDuplicateNIM) {
-		return failure(c, fiber.StatusBadRequest, "Validation failed", map[string]string{"nim": "sudah digunakan"})
+		return helper.Conflict("nim sudah digunakan")
 	}
-	if errors.Is(err, service.ErrInvalidStudent) {
-		return failure(c, fiber.StatusBadRequest, "Validation failed", map[string]string{"student": "nim, nama, dan grade harus valid"})
+	if err != nil {
+		return helper.Internal(err)
 	}
 	return created(c, "student berhasil dibuat", student)
+}
+
+func (h *StudentHandler) patch(c *fiber.Ctx) error {
+	if err := helper.RequireJSON(c); err != nil {
+		return err
+	}
+	id, err := parseStudentID(c)
+	if err != nil {
+		return err
+	}
+	var request model.PatchStudentRequest
+	if err := c.BodyParser(&request); err != nil {
+		return helper.BadRequest("body harus berupa JSON yang valid")
+	}
+	if request.IsEmpty() {
+		return helper.BadRequest("setidaknya satu field harus dikirim")
+	}
+	if request.NIM != nil {
+		value := strings.TrimSpace(*request.NIM)
+		request.NIM = &value
+	}
+	if request.Name != nil {
+		value := strings.TrimSpace(*request.Name)
+		request.Name = &value
+	}
+	if fields := helper.ValidateStruct(request); fields != nil {
+		return helper.Validation(fields)
+	}
+	student, err := h.service.Patch(id, request)
+	switch {
+	case errors.Is(err, repository.ErrStudentNotFound):
+		return helper.NotFound("student tidak ditemukan")
+	case errors.Is(err, service.ErrDuplicateNIM):
+		return helper.Conflict("nim sudah digunakan")
+	case err != nil:
+		return helper.Internal(err)
+	default:
+		return success(c, "student berhasil diperbarui", student)
+	}
+}
+
+func parseStudentID(c *fiber.Ctx) (int, error) {
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil || id < 1 {
+		return 0, helper.BadRequest("id harus berupa angka positif")
+	}
+	return id, nil
 }

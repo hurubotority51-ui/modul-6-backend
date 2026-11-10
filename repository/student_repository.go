@@ -13,6 +13,7 @@ type StudentRepository interface {
 	List() []model.Student
 	GetByID(id int) (model.Student, error)
 	Create(student model.Student) model.Student
+	Update(student model.Student) error
 }
 
 type InMemoryStudentRepository struct {
@@ -51,4 +52,16 @@ func (r *InMemoryStudentRepository) Create(student model.Student) model.Student 
 	r.nextID++
 	r.students = append(r.students, student)
 	return student
+}
+
+func (r *InMemoryStudentRepository) Update(student model.Student) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.students {
+		if r.students[i].ID == student.ID {
+			r.students[i] = student
+			return nil
+		}
+	}
+	return ErrStudentNotFound
 }

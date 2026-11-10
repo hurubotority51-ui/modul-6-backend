@@ -12,24 +12,37 @@ type Student struct {
 }
 
 type CreateStudentRequest struct {
-	NIM      string  `json:"nim"`
-	Name     string  `json:"name"`
-	Grade    float64 `json:"grade"`
+	NIM      string  `json:"nim" validate:"required,min=3,max=20,nim"`
+	Name     string  `json:"name" validate:"required,min=2,max=100"`
+	Grade    float64 `json:"grade" validate:"gte=0,lte=4"`
 	IsActive bool    `json:"is_active"`
 }
 
-type ListQuery struct {
-	Page     int
-	Limit    int
-	Search   string
-	Sort     string
-	Order    string
-	IsActive *bool
+type PatchStudentRequest struct {
+	NIM      *string  `json:"nim" validate:"omitnil,min=3,max=20,nim"`
+	Name     *string  `json:"name" validate:"omitnil,min=2,max=100"`
+	Grade    *float64 `json:"grade" validate:"omitnil,gte=0,lte=4"`
+	IsActive *bool    `json:"is_active" validate:"omitnil"`
 }
 
-type Meta struct {
-	Page       int `json:"page"`
-	Limit      int `json:"limit"`
-	Total      int `json:"total"`
-	TotalPages int `json:"total_pages"`
+func (r PatchStudentRequest) IsEmpty() bool {
+	return r.NIM == nil && r.Name == nil && r.Grade == nil && r.IsActive == nil
+}
+
+type Cursor struct {
+	CreatedAt time.Time
+	ID        int
+}
+
+type CursorQuery struct {
+	Limit    int
+	Search   string
+	IsActive *bool
+	After    *Cursor
+}
+
+type CursorMeta struct {
+	Limit      int    `json:"limit"`
+	NextCursor string `json:"next_cursor,omitempty"`
+	HasMore    bool   `json:"has_more"`
 }

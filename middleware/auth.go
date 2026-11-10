@@ -1,9 +1,9 @@
 package middleware
 
 import (
-	"strconv"
 	"strings"
 
+	"modul6/helper"
 	"modul6/service"
 
 	"github.com/gofiber/fiber/v2"
@@ -19,11 +19,11 @@ func AuthRequired() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		parts := strings.SplitN(c.Get("Authorization"), " ", 2)
 		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"success": false, "message": "token tidak valid"})
+			return helper.Unauthorized("token tidak valid")
 		}
 		claims, err := service.ValidateToken(parts[1])
 		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"success": false, "message": "token tidak valid"})
+			return helper.Unauthorized("token tidak valid")
 		}
 		if userID, ok := claims[ContextUserID].(float64); ok {
 			c.Locals(ContextUserID, int(userID))
@@ -46,8 +46,6 @@ func RequireRoles(roles ...string) fiber.Handler {
 				return c.Next()
 			}
 		}
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"success": false, "message": "akses ditolak untuk role " + strconv.Quote(role),
-		})
+		return helper.Forbidden("akses ditolak untuk role " + role)
 	}
 }

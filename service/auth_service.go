@@ -33,13 +33,11 @@ func NewAuthService(repository repository.UserRepository) *AuthService {
 
 func (s *AuthService) Register(request model.RegisterRequest) (model.User, error) {
 	request.Username = strings.TrimSpace(request.Username)
-	request.Password = strings.TrimSpace(request.Password)
 	request.Role = strings.ToLower(strings.TrimSpace(request.Role))
-	if request.Username == "" || len(request.Password) < 6 || (request.Role != "admin" && request.Role != "user") {
-		return model.User{}, ErrInvalidCredentials
-	}
 	if _, err := s.repository.GetByUsername(request.Username); err == nil {
 		return model.User{}, ErrUserAlreadyExists
+	} else if !errors.Is(err, repository.ErrUserNotFound) {
+		return model.User{}, err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(request.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -55,8 +53,12 @@ func (s *AuthService) Register(request model.RegisterRequest) (model.User, error
 
 func (s *AuthService) Login(request model.LoginRequest) (model.AuthResponse, error) {
 	user, err := s.repository.GetByUsername(strings.TrimSpace(request.Username))
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(request.Password)) != nil {
+	if errors.Is(err, repository.ErrUserNotFound) ||
+		(err == nil && bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(request.Password)) != nil) {
 		return model.AuthResponse{}, ErrInvalidCredentials
+	}
+	if err != nil {
+		return model.AuthResponse{}, err
 	}
 	claims := jwt.MapClaims{
 		"user_id": user.ID, "username": user.Username, "role": user.Role,

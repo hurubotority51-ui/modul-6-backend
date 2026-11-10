@@ -11,14 +11,14 @@ type User struct {
 }
 
 type RegisterRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Role     string `json:"role"`
+	Username string `json:"username" validate:"required,min=3,max=30,username"`
+	Password string `json:"password" validate:"required,min=8,max=72,passwordbytes,nospace,strongpassword"`
+	Role     string `json:"role" validate:"required,oneof=admin user"`
 }
 
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username string `json:"username" validate:"required,username"`
+	Password string `json:"password" validate:"required"`
 }
 
 type AuthResponse struct {
