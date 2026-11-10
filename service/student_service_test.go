@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -12,16 +13,23 @@ import (
 
 func TestListCursorDoesNotRepeatRecordsAfterNewInsert(t *testing.T) {
 	repo := repository.NewInMemoryStudentRepository()
+	ctx := context.Background()
 	base := time.Date(2026, 9, 13, 14, 0, 0, 0, time.UTC)
 	for i := 1; i <= 4; i++ {
-		repo.Create(model.Student{
+		_, err := repo.Create(ctx, model.Student{
 			NIM: fmt.Sprintf("%08d", i), Name: fmt.Sprintf("Student %d", i),
 			CreatedAt: base,
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	svc := NewStudentService(repo)
 
-	firstPage, firstMeta := svc.List(model.CursorQuery{Limit: 2})
+	firstPage, firstMeta, err := svc.List(ctx, model.CursorQuery{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(firstPage) != 2 || !firstMeta.HasMore || firstMeta.NextCursor == "" {
 		t.Fatalf("first page/meta = %#v / %#v", firstPage, firstMeta)
 	}
@@ -30,10 +38,16 @@ func TestListCursorDoesNotRepeatRecordsAfterNewInsert(t *testing.T) {
 		t.Fatalf("invalid next cursor: %v", err)
 	}
 
-	repo.Create(model.Student{
+	_, err = repo.Create(ctx, model.Student{
 		NIM: "00000099", Name: "New top record", CreatedAt: base,
 	})
-	secondPage, secondMeta := svc.List(model.CursorQuery{Limit: 2, After: &cursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPage, secondMeta, err := svc.List(ctx, model.CursorQuery{Limit: 2, After: &cursor})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(secondPage) != 2 || secondMeta.HasMore || secondMeta.NextCursor != "" {
 		t.Fatalf("second page/meta = %#v / %#v", secondPage, secondMeta)
 	}

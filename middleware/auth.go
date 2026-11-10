@@ -1,13 +1,19 @@
 package middleware
 
 import (
+	"context"
 	"strings"
+	"time"
 
 	"modul6/helper"
 	"modul6/service"
 
 	"github.com/gofiber/fiber/v2"
 )
+
+type PermissionChecker interface {
+	HasPermission(ctx context.Context, role, permission string) (bool, error)
+}
 
 const (
 	ContextUserID   = "user_id"
@@ -47,5 +53,21 @@ func RequireRoles(roles ...string) fiber.Handler {
 			}
 		}
 		return helper.Forbidden("akses ditolak untuk role " + role)
+	}
+}
+
+func RequirePermission(checker PermissionChecker, permission string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		role, _ := c.Locals(ContextRole).(string)
+		ctx, cancel := context.WithTimeout(c.UserContext(), 5*time.Second)
+		defer cancel()
+		allowed, err := checker.HasPermission(ctx, role, permission)
+		if err != nil {
+			return helper.Internal(err)
+		}
+		if !allowed {
+			return helper.Forbidden("tidak memiliki permission " + permission)
+		}
+		return c.Next()
 	}
 }

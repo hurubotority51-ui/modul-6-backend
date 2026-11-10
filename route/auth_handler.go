@@ -37,7 +37,9 @@ func (h *AuthHandler) register(c *fiber.Ctx) error {
 	if fields := helper.ValidateStruct(request); fields != nil {
 		return helper.Validation(fields)
 	}
-	user, err := h.service.Register(request)
+	ctx, cancel := helper.RequestContext(c)
+	defer cancel()
+	user, err := h.service.Register(ctx, request)
 	if errors.Is(err, service.ErrUserAlreadyExists) {
 		return helper.Conflict("username sudah digunakan")
 	}
@@ -61,7 +63,9 @@ func (h *AuthHandler) login(c *fiber.Ctx) error {
 	if fields := helper.ValidateStruct(request); fields != nil {
 		return helper.Validation(fields)
 	}
-	response, err := h.service.Login(request)
+	ctx, cancel := helper.RequestContext(c)
+	defer cancel()
+	response, err := h.service.Login(ctx, request)
 	if errors.Is(err, service.ErrInvalidCredentials) {
 		return helper.Unauthorized("username atau password salah")
 	}
@@ -76,7 +80,9 @@ func (h *AuthHandler) me(c *fiber.Ctx) error {
 	if !ok {
 		return helper.Unauthorized("token tidak valid")
 	}
-	user, err := h.service.GetUserByID(userID)
+	ctx, cancel := helper.RequestContext(c)
+	defer cancel()
+	user, err := h.service.GetUserByID(ctx, userID)
 	if errors.Is(err, repository.ErrUserNotFound) {
 		return helper.NotFound("user tidak ditemukan")
 	}

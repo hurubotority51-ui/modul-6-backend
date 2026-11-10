@@ -1,6 +1,7 @@
 package route
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"modul6/service"
 
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func newStudentTestApp(t *testing.T) (*fiber.App, string) {
@@ -26,27 +28,34 @@ func newStudentTestApp(t *testing.T) (*fiber.App, string) {
 	app.Use(middleware.RequestID(), middleware.RequestLogger(logger))
 
 	users := repository.NewInMemoryUserRepository()
-	auth := service.NewAuthService(users)
-	if _, err := auth.Register(model.RegisterRequest{
-		Username: "admin", Password: "Securepass7", Role: "admin",
-	}); err != nil {
-		t.Fatalf("register test admin: %v", err)
-	}
-	login, err := auth.Login(model.LoginRequest{Username: "admin", Password: "Securepass7"})
+	ctx := context.Background()
+	password, err := bcrypt.GenerateFromPassword([]byte("Securepass7"), bcrypt.DefaultCost)
 	if err != nil {
-		t.Fatalf("login test admin: %v", err)
+		t.Fatal(err)
+	}
+	admin, err := users.Create(ctx, model.User{
+		Username: "admin", Password: string(password), Role: "admin",
+	})
+	if err != nil {
+		t.Fatalf("create test admin: %v", err)
+	}
+	token, err := service.GenerateAccessToken(admin)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	students := repository.NewInMemoryStudentRepository()
-	students.Create(model.Student{
+	if _, err := students.Create(ctx, model.Student{
 		NIM: "12345678", Name: "Alice, Smith", Grade: 3.5, IsActive: true,
 		CreatedAt: time.Date(2026, 9, 13, 14, 12, 40, 0, time.UTC),
-	})
+	}); err != nil {
+		t.Fatalf("seed test student: %v", err)
+	}
 	NewStudentHandler(service.NewStudentService(students)).Register(app)
 	app.Use(func(c *fiber.Ctx) error {
 		return helper.NotFound("endpoint tidak ditemukan")
 	})
-	return app, login.Token
+	return app, token
 }
 
 func TestStudentErrorResponsesAreCentralized(t *testing.T) {

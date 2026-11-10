@@ -65,7 +65,12 @@ func (h *StudentHandler) list(c *fiber.Ctx) error {
 		query.After = &cursor
 	}
 
-	data, meta := h.service.List(query)
+	ctx, cancel := helper.RequestContext(c)
+	defer cancel()
+	data, meta, err := h.service.List(ctx, query)
+	if err != nil {
+		return helper.Internal(err)
+	}
 	if format == helper.FormatCSV {
 		return helper.WriteStudentsCSV(c, data)
 	}
@@ -80,7 +85,9 @@ func (h *StudentHandler) get(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	student, err := h.service.GetByID(id)
+	ctx, cancel := helper.RequestContext(c)
+	defer cancel()
+	student, err := h.service.GetByID(ctx, id)
 	if errors.Is(err, repository.ErrStudentNotFound) {
 		return helper.NotFound("student tidak ditemukan")
 	}
@@ -103,7 +110,9 @@ func (h *StudentHandler) create(c *fiber.Ctx) error {
 	if fields := helper.ValidateStruct(request); fields != nil {
 		return helper.Validation(fields)
 	}
-	student, err := h.service.Create(request)
+	ctx, cancel := helper.RequestContext(c)
+	defer cancel()
+	student, err := h.service.Create(ctx, request)
 	if errors.Is(err, service.ErrDuplicateNIM) {
 		return helper.Conflict("nim sudah digunakan")
 	}
@@ -139,7 +148,9 @@ func (h *StudentHandler) patch(c *fiber.Ctx) error {
 	if fields := helper.ValidateStruct(request); fields != nil {
 		return helper.Validation(fields)
 	}
-	student, err := h.service.Patch(id, request)
+	ctx, cancel := helper.RequestContext(c)
+	defer cancel()
+	student, err := h.service.Patch(ctx, id, request)
 	switch {
 	case errors.Is(err, repository.ErrStudentNotFound):
 		return helper.NotFound("student tidak ditemukan")

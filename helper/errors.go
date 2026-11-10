@@ -59,6 +59,10 @@ func Conflict(message string) *AppError {
 	return &AppError{Status: fiber.StatusConflict, Code: CodeConflict, Message: message}
 }
 
+func NewError(status int, code, message string) *AppError {
+	return &AppError{Status: status, Code: code, Message: message}
+}
+
 func Validation(fields map[string]string) *AppError {
 	return &AppError{
 		Status: fiber.StatusUnprocessableEntity, Code: CodeValidation,
@@ -96,6 +100,21 @@ func Internal(cause error) *AppError {
 		Status: fiber.StatusInternalServerError, Code: CodeInternal,
 		Message: "terjadi kesalahan pada server", cause: cause,
 	}
+}
+
+func Success(c *fiber.Ctx, status int, message string, data any) error {
+	return c.Status(status).JSON(fiber.Map{
+		"success": true, "message": message, "data": data,
+	})
+}
+
+func Created(c *fiber.Ctx, message string, data any, location string) error {
+	c.Set(fiber.HeaderLocation, location)
+	return Success(c, fiber.StatusCreated, message, data)
+}
+
+func NoContent(c *fiber.Ctx) error {
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 type ErrorResponse struct {

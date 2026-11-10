@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
@@ -31,28 +32,27 @@ func NewAuthService(repository repository.UserRepository) *AuthService {
 	return &AuthService{repository: repository}
 }
 
-func (s *AuthService) Register(request model.RegisterRequest) (model.User, error) {
+func (s *AuthService) Register(ctx context.Context, request model.RegisterRequest) (model.User, error) {
 	request.Username = strings.TrimSpace(request.Username)
-	request.Role = strings.ToLower(strings.TrimSpace(request.Role))
-	if _, err := s.repository.GetByUsername(request.Username); err == nil {
-		return model.User{}, ErrUserAlreadyExists
-	} else if !errors.Is(err, repository.ErrUserNotFound) {
-		return model.User{}, err
-	}
+	request.Role = "user"
 	hash, err := bcrypt.GenerateFromPassword([]byte(request.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return model.User{}, err
 	}
-	return s.repository.Create(model.User{
+	user, err := s.repository.Create(ctx, model.User{
 		Username:  request.Username,
 		Password:  string(hash),
 		Role:      request.Role,
 		CreatedAt: time.Now(),
-	}), nil
+	})
+	if errors.Is(err, repository.ErrDuplicate) {
+		return model.User{}, ErrUserAlreadyExists
+	}
+	return user, err
 }
 
-func (s *AuthService) Login(request model.LoginRequest) (model.AuthResponse, error) {
-	user, err := s.repository.GetByUsername(strings.TrimSpace(request.Username))
+func (s *AuthService) Login(ctx context.Context, request model.LoginRequest) (model.AuthResponse, error) {
+	user, err := s.repository.GetByUsername(ctx, strings.TrimSpace(request.Username))
 	if errors.Is(err, repository.ErrUserNotFound) ||
 		(err == nil && bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(request.Password)) != nil) {
 		return model.AuthResponse{}, ErrInvalidCredentials
@@ -60,11 +60,7 @@ func (s *AuthService) Login(request model.LoginRequest) (model.AuthResponse, err
 	if err != nil {
 		return model.AuthResponse{}, err
 	}
-	claims := jwt.MapClaims{
-		"user_id": user.ID, "username": user.Username, "role": user.Role,
-		"exp": time.Now().Add(24 * time.Hour).Unix(), "iat": time.Now().Unix(),
-	}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(jwtSecret)
+	token, err := GenerateAccessToken(user)
 	if err != nil {
 		return model.AuthResponse{}, err
 	}
@@ -72,8 +68,20 @@ func (s *AuthService) Login(request model.LoginRequest) (model.AuthResponse, err
 	return model.AuthResponse{Token: token, User: user}, nil
 }
 
-func (s *AuthService) GetUserByID(id int) (model.User, error) {
-	user, err := s.repository.GetByID(id)
+func GenerateAccessToken(user model.User) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id": user.ID, "username": user.Username, "role": user.Role,
+		"exp": time.Now().Add(24 * time.Hour).Unix(), "iat": time.Now().Unix(),
+	}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(jwtSecret)
+	if err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (s *AuthService) GetUserByID(ctx context.Context, id int) (model.User, error) {
+	user, err := s.repository.GetByID(ctx, id)
 	if err != nil {
 		return model.User{}, err
 	}
